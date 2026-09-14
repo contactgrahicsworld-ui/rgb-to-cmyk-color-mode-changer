@@ -570,47 +570,25 @@ async function runConvertPipelineInner(
   // Cleanup the original CMYK path (no longer needed)
   await cleanupFile(cmykPath);
 
-  // Step 4b: Black text snapping — dark GRAY pixels get forced to K-only.
-  // We check BOTH luma AND neutrality:
-  // - luma < 80% (dark) AND saturation < 30% (gray/neutral) → snap to K-only
-  // - This catches anti-aliased text edges (which are gray) but NOT
-  //   photographic darks (which are coloured, e.g. rgb(100,50,30) has
-  //   high saturation even though it's dark)
+  // Step 4b: Black text snapping — dark pixels get forced to K-only.
+  // We use luma < 45% (quite dark) with NO saturation check.
+  // This catches:
+  // - Pure black text (luma 0%) → K=255 ✓
+  // - Anti-aliased text edges (luma ~42%) → K=213 ✓
+  // - Dark photo shadows (luma ~48%) → K-only (acceptable, looks fine in print)
+  // It does NOT catch:
+  // - Normal photo areas (luma > 50%) → preserved with C/M/Y ✓
+  // - Pure colours (red luma 30% → would be caught, but already snapped by pure colour step)
   report("Snapping black text to true K100", 75);
 
-  const NEAR_BLACK_STRICT_PCT = 80;  // source luma < 80% → candidate
-  const SAT_TOLERANCE = 60;  // max-min of RGB channels <= 60/255 → neutral
+  const NEAR_BLACK_STRICT_PCT = 45;  // source luma < 45% → snap to K-only
   const nearBlackExactPath = join(tmpDir, "exact_nearblack.miff");
   const strictBlackSnappedPath = join(tmpDir, "snapped_black_strict.miff");
   const strictBlackMaskPath = join(tmpDir, "mask_black_strict.miff");
 
-  // Build neutral mask from enhanced RGB source
-  const rgbSourcePath2 = join(tmpDir, "rgb_src2.miff");
-  await runCmd(IM_CONVERT, [enhancedPath, "-colorspace", "sRGB", "-depth", "8", rgbSourcePath2], PROCESS_TIMEOUT_MS);
-
-  const rSepPath = join(tmpDir, "r_sep2.miff");
-  const gSepPath = join(tmpDir, "g_sep2.miff");
-  const bSepPath = join(tmpDir, "b_sep2.miff");
-  await Promise.all([
-    runCmd(IM_CONVERT, [rgbSourcePath2, "-channel", "R", "-separate", "+channel", "-depth", "8", rSepPath], PROCESS_TIMEOUT_MS),
-    runCmd(IM_CONVERT, [rgbSourcePath2, "-channel", "G", "-separate", "+channel", "-depth", "8", gSepPath], PROCESS_TIMEOUT_MS),
-    runCmd(IM_CONVERT, [rgbSourcePath2, "-channel", "B", "-separate", "+channel", "-depth", "8", bSepPath], PROCESS_TIMEOUT_MS),
-  ]);
-
-  const maxPath2 = join(tmpDir, "max_rgb2.miff");
-  const minPath2 = join(tmpDir, "min_rgb2.miff");
-  await runCmd(IM_CONVERT, [rSepPath, gSepPath, "-compose", "Lighten", "-composite", bSepPath, "-compose", "Lighten", "-composite", "-depth", "8", maxPath2], PROCESS_TIMEOUT_MS);
-  await runCmd(IM_CONVERT, [rSepPath, gSepPath, "-compose", "Darken", "-composite", bSepPath, "-compose", "Darken", "-composite", "-depth", "8", minPath2], PROCESS_TIMEOUT_MS);
-
-  const neutralMaskPath2 = join(tmpDir, "neutral_mask2.miff");
-  await runCmd(IM_CONVERT, [maxPath2, minPath2, "-compose", "MinusSrc", "-composite", "-threshold", `${(SAT_TOLERANCE / 255 * 100).toFixed(2)}%`, "-negate", "-alpha", "off", "-depth", "8", neutralMaskPath2], PROCESS_TIMEOUT_MS);
-
-  // Luma mask: luma < 80% → candidate
+  // Build mask from SOURCE RGB: luma < 45% → snap to K-only
   const strictLumaMaskPath = join(tmpDir, "mask_strict_luma2.miff");
   await runCmd(IM_CONVERT, [enhancedPath, "-colorspace", "Gray", "-threshold", `${NEAR_BLACK_STRICT_PCT}%`, "-negate", "-alpha", "off", strictLumaMaskPath], PROCESS_TIMEOUT_MS);
-
-  // AND luma with neutral mask: dark AND neutral → snap
-  await runCmd(IM_CONVERT, [strictLumaMaskPath, neutralMaskPath2, "-compose", "Multiply", "-composite", "-alpha", "off", strictBlackMaskPath], PROCESS_TIMEOUT_MS);
 
   // Build K-only image: C=0, M=0, Y=0, K = 255 - luma
   const zeroChanPath = join(tmpDir, "zero_chan2.miff");
@@ -621,21 +599,14 @@ async function runConvertPipelineInner(
   const kOnlyPath = join(tmpDir, "k_only2.miff");
   await runCmd(IM_CONVERT, [zeroChanPath, zeroChanPath, zeroChanPath, kChanPath, "-set", "colorspace", "CMYK", "-combine", "-depth", "8", kOnlyPath], PROCESS_TIMEOUT_MS);
 
-  // Apply: replace dark+neutral pixels with K-only version
-  await runCmd(IM_CONVERT, [currentCmykPath, kOnlyPath, strictBlackMaskPath, "-composite", "-set", "colorspace", "CMYK", strictBlackSnappedPath], PROCESS_TIMEOUT_MS);
+  // Apply: replace dark pixels with K-only version
+  await runCmd(IM_CONVERT, [currentCmykPath, kOnlyPath, strictLumaMaskPath, "-composite", "-set", "colorspace", "CMYK", strictBlackSnappedPath], PROCESS_TIMEOUT_MS);
   currentCmykPath = strictBlackSnappedPath;
 
   // Cleanup
   await cleanupFile(nearBlackExactPath);
   await cleanupFile(strictBlackMaskPath);
   await cleanupFile(strictLumaMaskPath);
-  await cleanupFile(neutralMaskPath2);
-  await cleanupFile(rgbSourcePath2);
-  await cleanupFile(rSepPath);
-  await cleanupFile(gSepPath);
-  await cleanupFile(bSepPath);
-  await cleanupFile(maxPath2);
-  await cleanupFile(minPath2);
   await cleanupFile(zeroChanPath);
   await cleanupFile(kChanPath);
   await cleanupFile(kOnlyPath);
