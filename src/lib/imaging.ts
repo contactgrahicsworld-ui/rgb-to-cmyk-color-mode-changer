@@ -325,12 +325,20 @@ export function canEnhance(
       reason: `Output dimensions ${out.width}×${out.height}px exceed the maximum of ${MAX_OUTPUT_DIM}px for the selected enhancement factor.`,
     };
   }
-  // Memory budget check: pixels * 4 channels * 8 bytes ≈ memory in bytes for IM internals
+  // Memory budget check — lowered to 1.5GB to prevent timeouts
   const pixelBytes = out.width * out.height * 4 * 8;
-  if (pixelBytes > 4 * 1024 * 1024 * 1024) {
+  if (pixelBytes > 1.5 * 1024 * 1024 * 1024) {
     return {
       ok: false,
-      reason: `Image is too large for the selected enhancement level (would require ~${Math.round(pixelBytes / 1024 / 1024 / 1024)}GB of memory).`,
+      reason: `Image is too large for ${factor}× enhancement (would need ~${Math.round(pixelBytes / 1024 / 1024 / 1024)}GB RAM). Try 1× or 2× instead.`,
+    };
+  }
+  // Disk budget check — lowered to 1GB
+  const totalDiskBytes = out.width * out.height * 4 * 20;
+  if (totalDiskBytes > 1 * 1024 * 1024 * 1024) {
+    return {
+      ok: false,
+      reason: `Image is too large for ${factor}× enhancement (would need ~${Math.round(totalDiskBytes / 1024 / 1024 / 1024)}GB disk). Try 1× or 2× instead.`,
     };
   }
   return { ok: true };

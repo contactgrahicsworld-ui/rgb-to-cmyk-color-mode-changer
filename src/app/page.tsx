@@ -315,6 +315,12 @@ export default function Home() {
           )
         );
       } catch (err: any) {
+        let errMsg = "Network error. Please try again.";
+        if (err?.name === "AbortError") {
+          errMsg = "Processing timed out (5 minutes). Image may be too large for this enhancement factor. Try 1× or a smaller image.";
+        } else if (err?.message?.includes("Failed to fetch")) {
+          errMsg = "Connection lost. The image may be too large. Try a smaller image or lower enhancement (1× or 2×).";
+        }
         setJobs((prev) =>
           prev.map((j) =>
             j.id === jobId
@@ -323,7 +329,7 @@ export default function Home() {
                   status: "failed",
                   progress: 100,
                   progressStage: "Failed",
-                  error: "Network error. Please try again.",
+                  error: errMsg,
                 }
               : j
           )
@@ -1014,7 +1020,7 @@ function BackgroundRemoveCard() {
     fd.append("files", job.file);
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3 * 60 * 1000);
+      const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
       const resp = await fetch("/api/remove-bg", { method: "POST", body: fd, signal: controller.signal });
       clearTimeout(timeoutId);
       const data = await resp.json();
