@@ -538,24 +538,75 @@ export default function Home() {
         {/* Background Remover */}
         <BackgroundRemoveCard />
 
-        {/* Pipeline info */}
+        {/* How to use — Hindi instructions */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
               <Info className="size-4 sm:size-5" />
-              How it works
+              कैसे इस्तेमाल करें
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <ol className="text-xs sm:text-sm space-y-2 text-stone-600 dark:text-stone-400 list-decimal list-inside">
-              <li>Upload is validated by MIME type, magic bytes and dimensions.</li>
-              <li>Colour mode (RGB / RGBA / Grayscale / CMYK) and embedded ICC profile are detected.</li>
-              <li>Optional enhancement scales the image by the chosen factor using Lanczos resampling.</li>
-              <li>RGB is converted to CMYK using sRGB → default CMYK ICC profiles via LittleCMS2.</li>
-              <li>Eight exact pure colour mappings (red, black, white, cyan, magenta, yellow, blue, green) are force-snapped via mask+composite.</li>
-              <li>Output is encoded as a CMYK JPEG at quality 95 with 4:4:4 chroma, 600 × 600 DPI, PixelsPerInch.</li>
-              <li>Each output is independently re-inspected to verify JPEG format, CMYK colourspace, 600 DPI metadata and valid dimensions before the download button is enabled.</li>
-            </ol>
+          <CardContent className="space-y-6">
+            {/* CMYK Converter */}
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-stone-800 dark:text-stone-200 flex items-center gap-2">
+                <span className="size-5 rounded bg-rose-500 text-white text-[10px] flex items-center justify-center font-bold">1</span>
+                RGB → CMYK कलर कन्वर्टर
+              </p>
+              <ul className="text-xs sm:text-sm space-y-1.5 text-stone-600 dark:text-stone-400 list-disc list-inside pl-2">
+                <li>ऊपर अपलोड बॉक्स में इमेज ड्रैग-ड्रॉप करें या "Choose Files" पर क्लिक करें। JPG, PNG, TIFF, WEBP और PDF सपोर्टेड हैं।</li>
+                <li>इमेज का कलर मोड अपने आप डिटेक्ट हो जाएगा (RGB, RGBA, Grayscale या CMYK)।</li>
+                <li>Enhancement factor चुनें — <strong>1×</strong> (बिना बढ़ाए), <strong>2×</strong> (2 गुना), या <strong>4×</strong> (4 गुना रिज़ॉल्यूशन)।</li>
+                <li>"Convert to CMYK" बटन दबाएँ। इमेज ICC प्रोफाइल (sRGB → CMYK) के साथ प्रोसेस होगी।</li>
+                <li>ब्लैक टेक्स्ट अपने आप <strong>C0 M0 Y0 K100</strong> हो जाएगा — ऑफ़सेट प्रिंटिंग के लिए एकदम सही।</li>
+                <li>8 प्योर कलर्स (लाल, काला, सफ़ेद, सियान, मैजेंटा, पीला, नीला, हरा) एक्ज़ैक्ट CMYK वैल्यूज़ में कन्वर्ट होंगे।</li>
+                <li>आउटपुट: <strong>CMYK JPEG</strong> (600×600 DPI) + <strong>TIFF</strong> (लॉसलेस, ऑफ़सेट प्रिंटिंग के लिए)।</li>
+                <li>हर आउटपुट वैलिडेट होता है — JPEG फॉर्मेट, CMYK कलरस्पेस, 600 DPI, और डायमेंशन चेक होते हैं।</li>
+                <li>PDF अपलोड करने पर हर पेज अलग से कन्वर्ट होगा — हर पेज का अलग JPG/TIFF डाउनलोड होगा।</li>
+                <li>बैच प्रोसेसिंग: एक साथ 10 इमेजेज अपलोड करें — सब अलग-अलग प्रोसेस होंगी।</li>
+              </ul>
+            </div>
+
+            <Separator />
+
+            {/* Background Remover */}
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-stone-800 dark:text-stone-200 flex items-center gap-2">
+                <span className="size-5 rounded bg-rose-500 text-white text-[10px] flex items-center justify-center font-bold">2</span>
+                बैकग्राउंड रिमूवर (Background Remover)
+              </p>
+              <ul className="text-xs sm:text-sm space-y-1.5 text-stone-600 dark:text-stone-400 list-disc list-inside pl-2">
+                <li>नीचे "Background Remover" सेक्शन में इमेज ड्रैग-ड्रॉप करें या "Choose Files" पर क्लिक करें। JPG, PNG, WEBP, BMP सपोर्टेड हैं।</li>
+                <li>AI मॉडल (rembg + u2net) फोटो के फोरग्राउंड सब्जेक्ट को पहचानता है — जैसे इंसान, प्रोडक्ट, ऑब्जेक्ट।</li>
+                <li>"Remove Background" बटन दबाएँ। 5-15 सेकंड में बैकग्राउंड हट जाएगा।</li>
+                <li>आउटपुट: <strong>Transparent PNG</strong> — बैकग्राउंड पूरी तरह ट्रांसपेरेंट (alpha=0)।</li>
+                <li><strong>रिज़ॉल्यूशन लॉस नहीं होता</strong> — आउटपुट की डायमेंशन इनपुट के बराबर होती हैं।</li>
+                <li>बैच प्रोसेसिंग: एक साथ 5 इमेजेज अपलोड करें — सब अलग-अलग प्रोसेस होंगी।</li>
+                <li>हर इमेज का अलग "Download PNG" बटन होगा।</li>
+                <li>बिफोर/आफ्टर प्रीव्यू: ओरिजिनल इमेज और ट्रांसपेरेंट PNG साथ-साथ दिखेंगे।</li>
+                <li>बड़ी इमेजेज (2000×2000px तक) भी सपोर्टेड हैं — AI मॉडल अपने आप मेमोरी मैनेज करता है।</li>
+              </ul>
+            </div>
+
+            <Separator />
+
+            {/* Technical Details */}
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-stone-800 dark:text-stone-200 flex items-center gap-2">
+                <span className="size-5 rounded bg-stone-400 text-white text-[10px] flex items-center justify-center font-bold">i</span>
+                तकनीकी जानकारी
+              </p>
+              <ul className="text-xs sm:text-sm space-y-1.5 text-stone-600 dark:text-stone-400 list-disc list-inside pl-2">
+                <li>CMYK कन्वर्ज़न: ImageMagick 7 + LittleCMS2 (ICC प्रोफाइल के साथ)।</li>
+                <li>बैकग्राउंड रिमूवल: rembg + u2net AI मॉडल (Python)।</li>
+                <li>PDF सपोर्ट: Ghostscript (हर पेज अलग से रेंडर होता है)।</li>
+                <li>ब्लैक टेक्स्ट K=100%: GCR (Gray Component Replacement) तकनीक से।</li>
+                <li>TIFF आउटपुट: लॉसलेस, ऑफ़सेट प्रिंटिंग के लिए एकदम सही।</li>
+                <li>Enhancement: Lanczos resampling (टेक्स्ट और लोगो प्रिज़र्व)।</li>
+                <li>जेपीईजी क्वालिटी: 100 (मैक्सिमम प्योर कलर प्रिज़र्वेशन)।</li>
+                <li>600 DPI: प्रिंट-रेडी आउटपुट (PixelsPerInch)।</li>
+              </ul>
+            </div>
           </CardContent>
         </Card>
       </main>
