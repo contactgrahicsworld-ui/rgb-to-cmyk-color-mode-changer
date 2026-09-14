@@ -570,12 +570,16 @@ async function runConvertPipelineInner(
   // Cleanup the original CMYK path (no longer needed)
   await cleanupFile(cmykPath);
 
-  // Step 4b: Near-black text snapping — ALL dark neutral pixels get forced
-  // to C0 M0 Y0 K100 for offset printing. This catches anti-aliased text
-  // edges that ICC conversion turns into muddy rich black.
+  // Step 4b: Black text snapping — dark GRAY pixels get forced to K-only.
+  // We check BOTH luma AND neutrality:
+  // - luma < 80% (dark) AND saturation < 30% (gray/neutral) → snap to K-only
+  // - This catches anti-aliased text edges (which are gray) but NOT
+  //   photographic darks (which are coloured, e.g. rgb(100,50,30) has
+  //   high saturation even though it's dark)
   report("Snapping black text to true K100", 75);
 
-  const NEAR_BLACK_STRICT_PCT = 80;  // luma < 80% → snap to K=255
+  const NEAR_BLACK_STRICT_PCT = 80;  // source luma < 80% → candidate
+  const SAT_TOLERANCE = 60;  // max-min of RGB channels <= 60/255 → neutral
   const nearBlackExactPath = join(tmpDir, "exact_nearblack.miff");
   const strictBlackSnappedPath = join(tmpDir, "snapped_black_strict.miff");
   const strictBlackMaskPath = join(tmpDir, "mask_black_strict.miff");
@@ -598,22 +602,27 @@ async function runConvertPipelineInner(
   await runCmd(IM_CONVERT, [rSepPath, gSepPath, "-compose", "Lighten", "-composite", bSepPath, "-compose", "Lighten", "-composite", "-depth", "8", maxPath2], PROCESS_TIMEOUT_MS);
   await runCmd(IM_CONVERT, [rSepPath, gSepPath, "-compose", "Darken", "-composite", bSepPath, "-compose", "Darken", "-composite", "-depth", "8", minPath2], PROCESS_TIMEOUT_MS);
 
-  const SAT_TOLERANCE = 25;
   const neutralMaskPath2 = join(tmpDir, "neutral_mask2.miff");
   await runCmd(IM_CONVERT, [maxPath2, minPath2, "-compose", "MinusSrc", "-composite", "-threshold", `${(SAT_TOLERANCE / 255 * 100).toFixed(2)}%`, "-negate", "-alpha", "off", "-depth", "8", neutralMaskPath2], PROCESS_TIMEOUT_MS);
 
-  // Strict luma mask: luma < 80% → snap to K=255
+  // Luma mask: luma < 80% → candidate
   const strictLumaMaskPath = join(tmpDir, "mask_strict_luma2.miff");
   await runCmd(IM_CONVERT, [enhancedPath, "-colorspace", "Gray", "-threshold", `${NEAR_BLACK_STRICT_PCT}%`, "-negate", "-alpha", "off", strictLumaMaskPath], PROCESS_TIMEOUT_MS);
 
-  // AND strict luma with neutral mask
+  // AND luma with neutral mask: dark AND neutral → snap
   await runCmd(IM_CONVERT, [strictLumaMaskPath, neutralMaskPath2, "-compose", "Multiply", "-composite", "-alpha", "off", strictBlackMaskPath], PROCESS_TIMEOUT_MS);
 
-  // Solid CMYK black (true black, not rich black) — C0 M0 Y0 K100
-  await runCmd(IM_CONVERT, ["-size", `${dims.width}x${dims.height}`, "xc:cmyk(0,0,0,255)", "-colorspace", "CMYK", "-depth", "8", nearBlackExactPath], PROCESS_TIMEOUT_MS);
+  // Build K-only image: C=0, M=0, Y=0, K = 255 - luma
+  const zeroChanPath = join(tmpDir, "zero_chan2.miff");
+  const kChanPath = join(tmpDir, "k_chan2.miff");
+  await runCmd(IM_CONVERT, ["-size", `${dims.width}x${dims.height}`, "xc:black", "-depth", "8", zeroChanPath], PROCESS_TIMEOUT_MS);
+  await runCmd(IM_CONVERT, [enhancedPath, "-colorspace", "Gray", "-negate", "-depth", "8", kChanPath], PROCESS_TIMEOUT_MS);
+  
+  const kOnlyPath = join(tmpDir, "k_only2.miff");
+  await runCmd(IM_CONVERT, [zeroChanPath, zeroChanPath, zeroChanPath, kChanPath, "-set", "colorspace", "CMYK", "-combine", "-depth", "8", kOnlyPath], PROCESS_TIMEOUT_MS);
 
-  // Apply strict black mask
-  await runCmd(IM_CONVERT, [currentCmykPath, nearBlackExactPath, strictBlackMaskPath, "-composite", "-set", "colorspace", "CMYK", strictBlackSnappedPath], PROCESS_TIMEOUT_MS);
+  // Apply: replace dark+neutral pixels with K-only version
+  await runCmd(IM_CONVERT, [currentCmykPath, kOnlyPath, strictBlackMaskPath, "-composite", "-set", "colorspace", "CMYK", strictBlackSnappedPath], PROCESS_TIMEOUT_MS);
   currentCmykPath = strictBlackSnappedPath;
 
   // Cleanup
@@ -627,6 +636,9 @@ async function runConvertPipelineInner(
   await cleanupFile(bSepPath);
   await cleanupFile(maxPath2);
   await cleanupFile(minPath2);
+  await cleanupFile(zeroChanPath);
+  await cleanupFile(kChanPath);
+  await cleanupFile(kOnlyPath);
 
   // Step 4c: Near-white snapping — anti-aliased text edges fading into
   // white background get cleaned to pure C0 M0 Y0 K0
