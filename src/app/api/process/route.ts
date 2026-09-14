@@ -23,7 +23,8 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
-const VALID_FACTORS = new Set<EnhancementFactor>([1, 2, 4, 6, 8, 10, 15, 20, 25]);
+// Enhancement factors capped at 4× for reliable performance
+const VALID_FACTORS = new Set<EnhancementFactor>([1, 2, 4]);
 
 type ErrorCode =
   | "NO_FILE"
@@ -114,7 +115,7 @@ export async function POST(req: NextRequest) {
       {
         ok: false,
         errorCode: "INVALID_FACTOR" as ErrorCode,
-        error: `Invalid enhancement factor. Allowed: 1, 2, 4, 6, 8, 10, 15, 20, 25.`,
+        error: `Invalid enhancement factor. Allowed: 1, 2, 4..`,
       },
       { status: 400 }
     );

@@ -42,10 +42,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
 } from "@/components/ui/tabs";
 import {
   Tooltip,
@@ -127,17 +123,12 @@ interface FileJob {
   sessionId?: string;
 }
 
-interface InspectResult {
-  rgb: [number, number, number];
-  cmyk: [number, number, number, number];
-  exact: boolean;
-  note: string;
-}
 
 // ============================================================================
 // HELPERS
 // ============================================================================
-const ENHANCEMENT_OPTIONS: EnhancementFactor[] = [1, 2, 4, 6, 8, 10, 15, 20, 25];
+// Enhancement options capped at 4× for reliable performance
+const ENHANCEMENT_OPTIONS: EnhancementFactor[] = [1, 2, 4];
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -149,16 +140,6 @@ function shortUuid(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-const PURE_COLOURS: Array<{ rgb: string; cmyk: string; name: string }> = [
-  { rgb: "255,0,0", cmyk: "0,100,100,0", name: "Red" },
-  { rgb: "0,0,0", cmyk: "0,0,0,100", name: "Black" },
-  { rgb: "255,255,255", cmyk: "0,0,0,0", name: "White" },
-  { rgb: "0,255,255", cmyk: "100,0,0,0", name: "Cyan" },
-  { rgb: "255,0,255", cmyk: "0,100,0,0", name: "Magenta" },
-  { rgb: "255,255,0", cmyk: "0,0,100,0", name: "Yellow" },
-  { rgb: "0,0,255", cmyk: "100,100,0,0", name: "Blue" },
-  { rgb: "0,255,0", cmyk: "100,0,100,0", name: "Green" },
-];
 
 function rgbCss(r: number, g: number, b: number): string {
   return `rgb(${r}, ${g}, ${b})`;
@@ -553,38 +534,6 @@ export default function Home() {
             </div>
           </div>
         )}
-
-        {/* Tools: Colour inspector & Pure colours reference */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-              <Palette className="size-4 sm:size-5" />
-              Tools
-            </CardTitle>
-            <CardDescription className="text-xs sm:text-sm">
-              Inspect RGB → CMYK conversions and reference the exact pure
-              colour mappings enforced by the converter.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Tabs defaultValue="inspector">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="inspector" className="text-xs sm:text-sm">
-                  Colour Inspector
-                </TabsTrigger>
-                <TabsTrigger value="reference" className="text-xs sm:text-sm">
-                  Pure Colour Mappings
-                </TabsTrigger>
-              </TabsList>
-              <TabsContent value="inspector" className="mt-4">
-                <ColourInspector />
-              </TabsContent>
-              <TabsContent value="reference" className="mt-4">
-                <PureColourReference />
-              </TabsContent>
-            </Tabs>
-          </CardContent>
-        </Card>
 
         {/* Background Remover */}
         <BackgroundRemoveCard />
@@ -984,203 +933,6 @@ function BeforeAfter({
     </div>
   );
 }
-
-// ============================================================================
-// COLOUR INSPECTOR
-// ============================================================================
-function ColourInspector() {
-  const [r, setR] = useState(255);
-  const [g, setG] = useState(0);
-  const [b, setB] = useState(0);
-  const [result, setResult] = useState<InspectResult | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const inspect = useCallback(async () => {
-    setLoading(true);
-    try {
-      const resp = await fetch("/api/inspect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ r, g, b }),
-      });
-      const data = await resp.json();
-      if (data.ok) {
-        setResult({
-          rgb: data.rgb,
-          cmyk: data.cmyk,
-          exact: data.exact,
-          note: data.note,
-        });
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [r, g, b]);
-
-  React.useEffect(() => {
-    inspect();
-  }, [inspect]);
-
-  const [c, m, y, k] = result ? result.cmyk : [0, 0, 0, 0];
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
-        <div>
-          <Label htmlFor="r" className="text-xs">R</Label>
-          <Input
-            id="r"
-            type="number"
-            min={0}
-            max={255}
-            value={r}
-            onChange={(e) => setR(Math.max(0, Math.min(255, Number(e.target.value) || 0)))}
-            className="mt-1"
-          />
-        </div>
-        <div>
-          <Label htmlFor="g" className="text-xs">G</Label>
-          <Input
-            id="g"
-            type="number"
-            min={0}
-            max={255}
-            value={g}
-            onChange={(e) => setG(Math.max(0, Math.min(255, Number(e.target.value) || 0)))}
-            className="mt-1"
-          />
-        </div>
-        <div>
-          <Label htmlFor="b" className="text-xs">B</Label>
-          <Input
-            id="b"
-            type="number"
-            min={0}
-            max={255}
-            value={b}
-            onChange={(e) => setB(Math.max(0, Math.min(255, Number(e.target.value) || 0)))}
-            className="mt-1"
-          />
-        </div>
-      </div>
-
-      {/* Swatch preview */}
-      <div className="flex items-center gap-3">
-        <div
-          className="size-12 sm:size-14 rounded-md border border-stone-300 dark:border-stone-700 shrink-0"
-          style={{ background: rgbCss(r, g, b) }}
-          aria-label="RGB colour preview"
-        />
-        <div className="text-xs sm:text-sm">
-          <p className="font-medium">RGB: {r}, {g}, {b}</p>
-          <p className="text-stone-500 dark:text-stone-400">
-            CMYK: {Math.round(c / 2.55)}, {Math.round(m / 2.55)}, {Math.round(y / 2.55)}, {Math.round(k / 2.55)}
-            <span className="ml-1 text-[10px]">(%)</span>
-          </p>
-          <p className="text-stone-400 text-[11px]">
-            (0–255: {c}, {m}, {y}, {k})
-          </p>
-        </div>
-        <div
-          className="size-12 sm:size-14 rounded-md border border-stone-300 dark:border-stone-700 shrink-0 ml-auto"
-          style={{ background: cmykCss(c / 2.55, m / 2.55, y / 2.55, k / 2.55) }}
-          aria-label="CMYK colour preview (approximate on-screen rendering)"
-        />
-      </div>
-
-      {result?.exact && (
-        <Badge className="bg-emerald-100 text-emerald-700 border-emerald-300">
-          <CheckCircle2 className="size-3 mr-1" />
-          Exact deterministic mapping
-        </Badge>
-      )}
-      {result && !result.exact && (
-        <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50">
-          <Info className="size-3 mr-1" />
-          Approximate (photographic)
-        </Badge>
-      )}
-      {result?.note && (
-        <p className="text-[11px] sm:text-xs text-stone-500 dark:text-stone-400">
-          {result.note}
-        </p>
-      )}
-    </div>
-  );
-}
-
-// ============================================================================
-// PURE COLOUR REFERENCE
-// ============================================================================
-function PureColourReference() {
-  return (
-    <div className="space-y-3">
-      <p className="text-xs sm:text-sm text-stone-600 dark:text-stone-400">
-        These eight pure RGB colours are force-snapped to the exact CMYK
-        values shown below. Photographic colours use ICC profile conversion
-        via LittleCMS2.
-      </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {PURE_COLOURS.map((p) => {
-          const [r, g, b] = p.rgb.split(",").map(Number);
-          const [c, m, y, k] = p.cmyk.split(",").map(Number);
-          return (
-            <div
-              key={p.name}
-              className="flex items-center gap-3 rounded-md border border-stone-200 dark:border-stone-800 p-2 sm:p-3"
-            >
-              <div className="flex shrink-0">
-                <div
-                  className="size-10 sm:size-12 rounded-l-md border-y border-l border-stone-300 dark:border-stone-700"
-                  style={{ background: rgbCss(r, g, b) }}
-                  title={`RGB ${p.rgb}`}
-                />
-                <div
-                  className="size-10 sm:size-12 rounded-r-md border-y border-r border-stone-300 dark:border-stone-700"
-                  style={{ background: cmykCss(c, m, y, k) }}
-                  title={`CMYK ${p.cmyk}`}
-                />
-              </div>
-              <div className="flex-1 min-w-0 text-xs sm:text-sm">
-                <p className="font-medium">{p.name}</p>
-                <p className="text-stone-500 dark:text-stone-400 text-[11px]">
-                  RGB {p.rgb} → CMYK {p.cmyk}
-                </p>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <p className="text-[11px] text-stone-500 dark:text-stone-400 pt-1">
-        Note: JPEG DCT quantization may shift pure values by ±1 in the
-        final encoded file. This is inherent to the JPEG standard and
-        imperceptible in print.
-      </p>
-    </div>
-  );
-}
-
-// ============================================================================
-// BACKGROUND REMOVE TOOL
-// ============================================================================
-interface BgJob {
-  id: string;
-  file: File;
-  previewUrl: string;
-  status: "queued" | "processing" | "completed" | "failed";
-  error?: string;
-  errorCode?: string;
-  result?: {
-    width: number;
-    height: number;
-    bytes: number;
-    format: string;
-    hasAlpha: boolean;
-    downloadUrl: string;
-    previewUrl: string;
-  };
-}
-
 function BackgroundRemoveCard() {
   const [jobs, setJobs] = useState<BgJob[]>([]);
   const [isDragging, setIsDragging] = useState(false);

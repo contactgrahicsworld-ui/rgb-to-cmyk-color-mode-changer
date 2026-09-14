@@ -26,7 +26,7 @@ export const PROCESS_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes per image
 export const SESSION_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 // JPEG output settings
-const JPEG_QUALITY = 95;
+const JPEG_QUALITY = 100;  // Quality 100 for best pure colour preservation
 const JPEG_DPI = 600;
 
 // Allowed input MIME types and their signatures
@@ -93,6 +93,8 @@ export interface OutputInfo {
   bytes: number;
   validated: boolean;
   path: string;
+  tiffPath: string;
+  tiffBytes: number;
   previewPath: string;
 }
 
@@ -343,7 +345,8 @@ export function safeEnhancementFactors(
   inputW: number,
   inputH: number
 ): EnhancementFactor[] {
-  const all: EnhancementFactor[] = [1, 2, 4, 6, 8];
+  // Capped at 4× — higher factors cause memory/timeout failures
+  const all: EnhancementFactor[] = [1, 2, 4];
   return all.filter((f) => canEnhance(inputW, inputH, f).ok);
 }
 
@@ -366,9 +369,30 @@ async function runConvertPipeline(
   const tmpDir = join(TMP_ROOT, inputInfo.sessionId, inputInfo.id);
   await mkdir(tmpDir, { recursive: true });
 
+  try {
+    await runConvertPipelineInner(inputPath, outputPath, previewPath, inputInfo, opts, tmpDir);
+  } finally {
+    // ALWAYS clean up intermediate files, even on failure
+    try { await rm(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+}
+
+async function runConvertPipelineInner(
+  inputPath: string,
+  outputPath: string,
+  previewPath: string,
+  inputInfo: ImageInfo,
+  opts: PipelineOptions,
+  tmpDir: string
+): Promise<void> {
   const { enhancement, onProgress } = opts;
   const report = (stage: string, percent: number) =>
     onProgress?.(stage, percent);
+
+  // Helper: delete a file if it exists (saves disk space between steps)
+  const cleanupFile = async (p: string) => {
+    try { await rm(p, { force: true }); } catch { /* ignore */ }
+  };
 
   report("Reading and normalizing input", 5);
 
@@ -539,9 +563,88 @@ async function runConvertPipeline(
     i++;
     report(
       "Applying exact pure colour mappings",
-      60 + Math.floor((i / PURE_COLOUR_MAPPINGS.length) * 20)
+      60 + Math.floor((i / PURE_COLOUR_MAPPINGS.length) * 10)
     );
   }
+
+  // Cleanup the original CMYK path (no longer needed)
+  await cleanupFile(cmykPath);
+
+  // Step 4b: Near-black text snapping — ALL dark neutral pixels get forced
+  // to C0 M0 Y0 K100 for offset printing. This catches anti-aliased text
+  // edges that ICC conversion turns into muddy rich black.
+  report("Snapping black text to true K100", 75);
+
+  const NEAR_BLACK_STRICT_PCT = 80;  // luma < 80% → snap to K=255
+  const nearBlackExactPath = join(tmpDir, "exact_nearblack.miff");
+  const strictBlackSnappedPath = join(tmpDir, "snapped_black_strict.miff");
+  const strictBlackMaskPath = join(tmpDir, "mask_black_strict.miff");
+
+  // Build neutral mask from enhanced RGB source
+  const rgbSourcePath2 = join(tmpDir, "rgb_src2.miff");
+  await runCmd(IM_CONVERT, [enhancedPath, "-colorspace", "sRGB", "-depth", "8", rgbSourcePath2], PROCESS_TIMEOUT_MS);
+
+  const rSepPath = join(tmpDir, "r_sep2.miff");
+  const gSepPath = join(tmpDir, "g_sep2.miff");
+  const bSepPath = join(tmpDir, "b_sep2.miff");
+  await Promise.all([
+    runCmd(IM_CONVERT, [rgbSourcePath2, "-channel", "R", "-separate", "+channel", "-depth", "8", rSepPath], PROCESS_TIMEOUT_MS),
+    runCmd(IM_CONVERT, [rgbSourcePath2, "-channel", "G", "-separate", "+channel", "-depth", "8", gSepPath], PROCESS_TIMEOUT_MS),
+    runCmd(IM_CONVERT, [rgbSourcePath2, "-channel", "B", "-separate", "+channel", "-depth", "8", bSepPath], PROCESS_TIMEOUT_MS),
+  ]);
+
+  const maxPath2 = join(tmpDir, "max_rgb2.miff");
+  const minPath2 = join(tmpDir, "min_rgb2.miff");
+  await runCmd(IM_CONVERT, [rSepPath, gSepPath, "-compose", "Lighten", "-composite", bSepPath, "-compose", "Lighten", "-composite", "-depth", "8", maxPath2], PROCESS_TIMEOUT_MS);
+  await runCmd(IM_CONVERT, [rSepPath, gSepPath, "-compose", "Darken", "-composite", bSepPath, "-compose", "Darken", "-composite", "-depth", "8", minPath2], PROCESS_TIMEOUT_MS);
+
+  const SAT_TOLERANCE = 25;
+  const neutralMaskPath2 = join(tmpDir, "neutral_mask2.miff");
+  await runCmd(IM_CONVERT, [maxPath2, minPath2, "-compose", "MinusSrc", "-composite", "-threshold", `${(SAT_TOLERANCE / 255 * 100).toFixed(2)}%`, "-negate", "-alpha", "off", "-depth", "8", neutralMaskPath2], PROCESS_TIMEOUT_MS);
+
+  // Strict luma mask: luma < 80% → snap to K=255
+  const strictLumaMaskPath = join(tmpDir, "mask_strict_luma2.miff");
+  await runCmd(IM_CONVERT, [enhancedPath, "-colorspace", "Gray", "-threshold", `${NEAR_BLACK_STRICT_PCT}%`, "-negate", "-alpha", "off", strictLumaMaskPath], PROCESS_TIMEOUT_MS);
+
+  // AND strict luma with neutral mask
+  await runCmd(IM_CONVERT, [strictLumaMaskPath, neutralMaskPath2, "-compose", "Multiply", "-composite", "-alpha", "off", strictBlackMaskPath], PROCESS_TIMEOUT_MS);
+
+  // Solid CMYK black (true black, not rich black) — C0 M0 Y0 K100
+  await runCmd(IM_CONVERT, ["-size", `${dims.width}x${dims.height}`, "xc:cmyk(0,0,0,255)", "-colorspace", "CMYK", "-depth", "8", nearBlackExactPath], PROCESS_TIMEOUT_MS);
+
+  // Apply strict black mask
+  await runCmd(IM_CONVERT, [currentCmykPath, nearBlackExactPath, strictBlackMaskPath, "-composite", "-set", "colorspace", "CMYK", strictBlackSnappedPath], PROCESS_TIMEOUT_MS);
+  currentCmykPath = strictBlackSnappedPath;
+
+  // Cleanup
+  await cleanupFile(nearBlackExactPath);
+  await cleanupFile(strictBlackMaskPath);
+  await cleanupFile(strictLumaMaskPath);
+  await cleanupFile(neutralMaskPath2);
+  await cleanupFile(rgbSourcePath2);
+  await cleanupFile(rSepPath);
+  await cleanupFile(gSepPath);
+  await cleanupFile(bSepPath);
+  await cleanupFile(maxPath2);
+  await cleanupFile(minPath2);
+
+  // Step 4c: Near-white snapping — anti-aliased text edges fading into
+  // white background get cleaned to pure C0 M0 Y0 K0
+  report("Cleaning white background", 80);
+  const NEAR_WHITE_THRESHOLD_PCT = 92;
+  const nearWhiteMaskPath = join(tmpDir, "mask_nearwhite2.miff");
+  const nearWhiteExactPath = join(tmpDir, "exact_nearwhite2.miff");
+  const nearWhiteSnappedPath = join(tmpDir, "snapped_nearwhite2.miff");
+
+  await runCmd(IM_CONVERT, [enhancedPath, "-colorspace", "Gray", "-threshold", `${NEAR_WHITE_THRESHOLD_PCT}%`, "-alpha", "off", nearWhiteMaskPath], PROCESS_TIMEOUT_MS);
+  await runCmd(IM_CONVERT, ["-size", `${dims.width}x${dims.height}`, "xc:cmyk(0,0,0,0)", "-colorspace", "CMYK", "-depth", "8", nearWhiteExactPath], PROCESS_TIMEOUT_MS);
+  await runCmd(IM_CONVERT, [currentCmykPath, nearWhiteExactPath, nearWhiteMaskPath, "-composite", "-set", "colorspace", "CMYK", nearWhiteSnappedPath], PROCESS_TIMEOUT_MS);
+  currentCmykPath = nearWhiteSnappedPath;
+
+  await cleanupFile(nearWhiteMaskPath);
+  await cleanupFile(nearWhiteExactPath);
+  if (enhancedPath !== normalizedPath) await cleanupFile(enhancedPath);
+  await cleanupFile(normalizedPath);
 
   report("Writing CMYK JPEG at 600 DPI", 85);
 
@@ -566,6 +669,18 @@ async function runConvertPipeline(
     throw new Error(`JPEG encoding failed: ${r5.stderr.slice(0, 200)}`);
   }
 
+  // Also write a TIFF version (lossless) for offset printing
+  const tiffPath = outputPath.replace(/\.jpg$/i, ".tiff");
+  const tiffArgs = [
+    currentCmykPath,
+    "-density", `${JPEG_DPI}`,
+    "-units", "PixelsPerInch",
+    "-compress", "None",
+    "-depth", "8",
+    tiffPath,
+  ];
+  await runCmd(IM_CONVERT, tiffArgs, PROCESS_TIMEOUT_MS);
+
   report("Generating preview", 92);
 
   // Step 6: Generate RGB preview (downsized, sRGB JPEG) for before/after display
@@ -589,13 +704,7 @@ async function runConvertPipeline(
     throw new Error(`Preview generation failed: ${r6.stderr.slice(0, 200)}`);
   }
 
-  // Cleanup intermediate files
-  try {
-    await rm(tmpDir, { recursive: true, force: true });
-  } catch {
-    // ignore
-  }
-
+  // (intermediate files are cleaned up by the outer try/finally)
   report("Done", 100);
 }
 
@@ -825,6 +934,13 @@ export async function processImage(
       };
     }
 
+    const tiffPath = outputPath.replace(/\.jpg$/i, ".tiff");
+    let tiffBytes = 0;
+    try {
+      const tiffStat = await stat(tiffPath);
+      tiffBytes = tiffStat.size;
+    } catch {}
+
     const outputInfo: OutputInfo = {
       width: inputInfo.width * enhancement,
       height: inputInfo.height * enhancement,
@@ -836,6 +952,8 @@ export async function processImage(
       bytes: (await stat(outputPath)).size,
       validated: true,
       path: outputPath,
+      tiffPath,
+      tiffBytes,
       previewPath,
     };
 
