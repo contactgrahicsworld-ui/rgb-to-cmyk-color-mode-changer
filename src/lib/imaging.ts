@@ -35,6 +35,7 @@ const ALLOWED_FORMATS = {
   "image/png": { ext: "png", magic: [/^\x89PNG\r\n\x1a\n/] },
   "image/tiff": { ext: "tif", magic: [/^II\x2a\x00/, /^MM\x00\x2a/] },
   "image/webp": { ext: "webp", magic: [/^RIFF....WEBP/] },
+  "application/pdf": { ext: "pdf", magic: [/^%PDF-/] },
 } as const;
 
 export type AllowedMime = keyof typeof ALLOWED_FORMATS;
@@ -331,6 +332,19 @@ export function canEnhance(
     };
   }
   return { ok: true };
+}
+
+/**
+ * For a given input image, return the list of enhancement factors that are
+ * safe to apply (won't exceed memory/disk limits).
+ * Capped at 8× — higher factors cause memory/timeout failures.
+ */
+export function safeEnhancementFactors(
+  inputW: number,
+  inputH: number
+): EnhancementFactor[] {
+  const all: EnhancementFactor[] = [1, 2, 4, 6, 8];
+  return all.filter((f) => canEnhance(inputW, inputH, f).ok);
 }
 
 // ============================================================================
@@ -851,3 +865,57 @@ export const __test = {
   TMP_ROOT,
   JPEG_DPI,
 };
+
+// ============================================================================
+// PDF SUPPORT
+// ============================================================================
+
+export async function getPdfPageCount(pdfPath: string): Promise<number> {
+  const { stdout, code } = await runCmd(IM_IDENTIFY, ["-format", "%n\n", pdfPath], 30000);
+  if (code !== 0) return 0;
+  return stdout.trim().split("\n").filter((l) => l.trim()).length;
+}
+
+export async function renderPdfPage(
+  pdfPath: string, pageIndex: number, outPath: string, renderDpi: number = 300
+): Promise<{ width: number; height: number }> {
+  const args = ["-density", `${renderDpi}`, `${pdfPath}[${pageIndex}]`, "-colorspace", "sRGB", "-profile", ICC_SRGB, outPath];
+  const r = await runCmd(IM_CONVERT, args, 120000);
+  if (r.code !== 0) throw new Error(`PDF page ${pageIndex} render failed: ${r.stderr.slice(0, 200)}`);
+  const { stdout } = await runCmd(IM_IDENTIFY, ["-format", "%w %h", outPath]);
+  const parts = stdout.trim().split(/\s+/);
+  return { width: parseInt(parts[0], 10) || 0, height: parseInt(parts[1], 10) || 0 };
+}
+
+export async function processPdf(
+  pdfPath: string, sessionId: string, enhancement: EnhancementFactor,
+  onProgress?: (page: number, total: number, stage: string) => void
+): Promise<ProcessResult[]> {
+  const startTime = Date.now();
+  const totalPages = await getPdfPageCount(pdfPath);
+  if (totalPages === 0) {
+    return [{
+      ok: false, input: { id: "pdf", sessionId, originalName: "document.pdf", sanitizedName: "document.pdf",
+        width: 0, height: 0, format: "pdf", mime: "application/pdf", colourMode: "Unknown", hasIccProfile: false, bytes: 0 },
+      error: "PDF has no pages or could not be read.", elapsedMs: Date.now() - startTime,
+    }];
+  }
+  const MAX_PAGES = 50;
+  const pagesToProcess = Math.min(totalPages, MAX_PAGES);
+  const results: ProcessResult[] = [];
+  for (let i = 0; i < pagesToProcess; i++) {
+    onProgress?.(i + 1, pagesToProcess, `Rendering page ${i + 1}/${pagesToProcess}`);
+    const pagePngPath = join(TMP_ROOT, sessionId, `page_${i}_source.png`);
+    let pageDims;
+    try { pageDims = await renderPdfPage(pdfPath, i, pagePngPath); } catch (e: any) {
+      results.push({ ok: false, input: { id: `page_${i}`, sessionId, originalName: `document.pdf[page ${i + 1}]`, sanitizedName: `document_page_${i + 1}`, width: 0, height: 0, format: "pdf", mime: "application/pdf", colourMode: "Unknown", hasIccProfile: false, bytes: 0 }, error: e?.message || `Failed to render page ${i + 1}.`, elapsedMs: 0 });
+      continue;
+    }
+    const pageInfo: ImageInfo = { id: `page_${i}`, sessionId, originalName: `document.pdf (page ${i + 1}/${totalPages})`, sanitizedName: `document_page_${i + 1}`, width: pageDims.width, height: pageDims.height, format: "png", mime: "image/png", colourMode: "RGB", hasIccProfile: false, bytes: 0 };
+    onProgress?.(i + 1, pagesToProcess, `Converting page ${i + 1}/${pagesToProcess} to CMYK`);
+    const result = await processImage(pagePngPath, pageInfo, enhancement);
+    try { const { rm } = await import("fs/promises"); await rm(pagePngPath, { force: true }); } catch {}
+    results.push(result);
+  }
+  return results;
+}

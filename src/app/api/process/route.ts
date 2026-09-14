@@ -10,6 +10,8 @@ import {
   extensionFor,
   getImageInfo,
   processImage,
+  processPdf,
+  getPdfPageCount,
   MAX_UPLOAD_BYTES,
   MAX_BATCH_FILES,
   type EnhancementFactor,
@@ -53,6 +55,9 @@ interface ProcessResponseItem {
     bytes: number;
     validated: boolean;
     downloadUrl: string;
+    tiffDownloadUrl?: string;
+    tiffBytes?: number;
+    hasTiff?: boolean;
     previewUrl: string;
   };
   validation?: {
@@ -66,6 +71,9 @@ interface ProcessResponseItem {
     reasons: string[];
   };
   elapsedMs?: number;
+  pages?: ProcessResponseItem[];
+  isPdf?: boolean;
+  totalPages?: number;
 }
 
 export async function POST(req: NextRequest) {
@@ -171,6 +179,13 @@ async function processOneFile(
     };
   }
 
+  // PDF special handling: render each page, convert each to CMYK separately
+  if (mime === "application/pdf") {
+    return await processPdfFile(file, originalPath, sessionId, enhancement, safeName);
+  }
+
+  // Standard image handling
+
   let info: ImageInfo;
   try {
     const detected = await getImageInfo(originalPath);
@@ -224,9 +239,112 @@ async function processOneFile(
       bytes: result.output!.bytes,
       validated: result.output!.validated,
       downloadUrl: `/api/download?sessionId=${sessionId}&fileId=${fileId}`,
+      tiffDownloadUrl: `/api/download?sessionId=${sessionId}&fileId=${fileId}&format=tiff`,
+      tiffBytes: result.output!.tiffBytes,
+      hasTiff: result.output!.tiffBytes > 0,
       previewUrl: `/api/preview?sessionId=${sessionId}&fileId=${fileId}`,
     },
     validation: result.validation,
     elapsedMs: result.elapsedMs,
+  };
+}
+
+/**
+ * Process a PDF: render each page, convert each to CMYK, return per-page
+ * results that the UI can show individually with per-page download links.
+ */
+async function processPdfFile(
+  file: File,
+  pdfPath: string,
+  sessionId: string,
+  enhancement: EnhancementFactor,
+  safeName: string
+): Promise<ProcessResponseItem> {
+  let totalPages = 0;
+  try {
+    totalPages = await getPdfPageCount(pdfPath);
+  } catch {
+    return {
+      ok: false,
+      errorCode: "CORRUPT_IMAGE" as ErrorCode,
+      error: "PDF could not be read. It may be corrupt or password-protected.",
+      isPdf: true,
+      totalPages: 0,
+    };
+  }
+
+  if (totalPages === 0) {
+    return {
+      ok: false,
+      errorCode: "CORRUPT_IMAGE" as ErrorCode,
+      error: "PDF has no pages.",
+      isPdf: true,
+      totalPages: 0,
+    };
+  }
+
+  const MAX_PAGES = 50;
+  const pagesToProcess = Math.min(totalPages, MAX_PAGES);
+  const startTime = Date.now();
+
+  const parentInfo: ImageInfo = {
+    id: randomUUID(),
+    sessionId,
+    originalName: file.name || safeName,
+    sanitizedName: safeName,
+    width: 0,
+    height: 0,
+    format: "pdf",
+    mime: "application/pdf",
+    colourMode: "Unknown",
+    hasIccProfile: false,
+    bytes: file.size,
+  };
+
+  const pdfResults = await processPdf(pdfPath, sessionId, enhancement);
+
+  const pageItems: ProcessResponseItem[] = pdfResults.map((r, i) => {
+    if (!r.ok) {
+      return {
+        ok: false,
+        errorCode: "PROCESSING_FAILED" as ErrorCode,
+        error: r.error || `Page ${i + 1} processing failed.`,
+        input: r.input,
+        elapsedMs: r.elapsedMs,
+      };
+    }
+    const pageId = `page_${i}`;
+    return {
+      ok: true,
+      input: r.input,
+      output: {
+        width: r.output!.width,
+        height: r.output!.height,
+        enhancementFactor: r.output!.enhancementFactor,
+        dpiX: r.output!.dpiX,
+        dpiY: r.output!.dpiY,
+        colourSpace: r.output!.colourSpace,
+        format: r.output!.format,
+        bytes: r.output!.bytes,
+        validated: r.output!.validated,
+        downloadUrl: `/api/download?sessionId=${sessionId}&fileId=${pageId}`,
+        previewUrl: `/api/preview?sessionId=${sessionId}&fileId=${pageId}`,
+      },
+      validation: r.validation,
+      elapsedMs: r.elapsedMs,
+    };
+  });
+
+  const successCount = pageItems.filter((p) => p.ok).length;
+
+  return {
+    ok: successCount > 0,
+    isPdf: true,
+    totalPages: pagesToProcess,
+    input: parentInfo,
+    pages: pageItems,
+    elapsedMs: Date.now() - startTime,
+    error: successCount === 0 ? "All pages failed to process." : undefined,
+    errorCode: successCount === 0 ? "PROCESSING_FAILED" as ErrorCode : undefined,
   };
 }

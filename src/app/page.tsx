@@ -17,6 +17,7 @@ import {
   Layers,
   Info,
   AlertTriangle,
+  Scissors,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -71,10 +72,23 @@ interface ImageMeta {
   originalName: string;
 }
 
+interface PdfPageResult {
+  ok: boolean;
+  error?: string;
+  pageIndex: number;
+  pageNumber: number;
+  width: number;
+  height: number;
+  bytes: number;
+  downloadUrl: string;
+  previewUrl: string;
+  validated: boolean;
+}
+
 interface FileJob {
   id: string;
   file: File;
-  previewUrl: string; // object URL for original
+  previewUrl: string;
   status: "queued" | "processing" | "completed" | "failed";
   progress: number;
   progressStage: string;
@@ -92,8 +106,14 @@ interface FileJob {
     bytes: number;
     validated: boolean;
     downloadUrl: string;
+    tiffDownloadUrl?: string;
+    tiffBytes?: number;
+    hasTiff?: boolean;
     previewUrl: string;
   };
+  isPdf?: boolean;
+  totalPages?: number;
+  pdfPages?: PdfPageResult[];
   validation?: {
     ok: boolean;
     isJpeg: boolean;
@@ -293,6 +313,22 @@ export default function Home() {
                   result: item.output,
                   validation: item.validation,
                   sessionId: data.sessionId,
+                  isPdf: !!item.isPdf,
+                  totalPages: item.totalPages,
+                  pdfPages: item.pages
+                    ? item.pages.map((p: any, idx: number) => ({
+                        ok: !!p.ok,
+                        error: p.error,
+                        pageIndex: idx,
+                        pageNumber: idx + 1,
+                        width: p.output?.width || 0,
+                        height: p.output?.height || 0,
+                        bytes: p.output?.bytes || 0,
+                        downloadUrl: p.output?.downloadUrl || "",
+                        previewUrl: p.output?.previewUrl || "",
+                        validated: p.output?.validated || false,
+                      }))
+                    : undefined,
                 }
               : j
           )
@@ -384,7 +420,7 @@ export default function Home() {
             Convert RGB images to print-ready CMYK
           </h2>
           <p className="text-sm sm:text-base text-stone-600 dark:text-stone-400 max-w-3xl">
-            Upload JPG, PNG, TIFF or WEBP. The image is colour-managed through
+            Upload JPG, PNG, TIFF, WEBP or PDF. The image is colour-managed through
             ICC profiles (sRGB → CMYK via LittleCMS), pure colours are snapped
             to exact deterministic CMYK values, and the result is encoded as a
             genuine CMYK JPEG at 600 × 600 DPI. Every output is independently
@@ -401,7 +437,7 @@ export default function Home() {
             </CardTitle>
             <CardDescription className="text-xs sm:text-sm">
               Drop files here or click to browse. Up to 10 files per batch,
-              50&nbsp;MB each. JPG, PNG, TIFF, WEBP.
+              50&nbsp;MB each. JPG, PNG, TIFF, WEBP, PDF.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -421,7 +457,7 @@ export default function Home() {
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept="image/jpeg,image/png,image/tiff,image/webp,.jpg,.jpeg,.png,.tif,.tiff,.webp"
+                accept="image/jpeg,image/png,image/tiff,image/webp,application/pdf,.jpg,.jpeg,.png,.tif,.tiff,.webp,.pdf"
                 onChange={onFileInputChange}
                 className="sr-only"
               />
@@ -549,6 +585,9 @@ export default function Home() {
             </Tabs>
           </CardContent>
         </Card>
+
+        {/* Background Remover */}
+        <BackgroundRemoveCard />
 
         {/* Pipeline info */}
         <Card>
@@ -729,8 +768,27 @@ function JobCard({
           </div>
         )}
 
+        {/* PDF Pages */}
+        {isCompleted && job.isPdf && job.pdfPages && job.pdfPages.length > 0 && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <p className="text-sm font-medium">
+                PDF Pages ({job.pdfPages.filter((p) => p.ok).length}/{job.pdfPages.length} converted)
+              </p>
+              <span className="text-[11px] text-stone-500 dark:text-stone-400">
+                Each page downloads separately as CMYK JPG
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-96 overflow-y-auto pr-1">
+              {job.pdfPages.map((page) => (
+                <PdfPageCard key={page.pageIndex} page={page} />
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Actions */}
-        {isCompleted && job.result && (
+        {isCompleted && job.result && !job.isPdf && (
           <div className="flex flex-wrap gap-2">
             <Button asChild className="gap-2">
               <a href={job.result.downloadUrl} download>
@@ -751,7 +809,7 @@ function JobCard({
         )}
 
         {/* Before/After */}
-        {isCompleted && job.result && showPreview && (
+        {isCompleted && job.result && !job.isPdf && showPreview && (
           <BeforeAfter
             originalUrl={job.previewUrl}
             processedUrl={job.result.previewUrl}
@@ -1098,6 +1156,236 @@ function PureColourReference() {
         final encoded file. This is inherent to the JPEG standard and
         imperceptible in print.
       </p>
+    </div>
+  );
+}
+
+// ============================================================================
+// BACKGROUND REMOVE TOOL
+// ============================================================================
+interface BgJob {
+  id: string;
+  file: File;
+  previewUrl: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  error?: string;
+  errorCode?: string;
+  result?: {
+    width: number;
+    height: number;
+    bytes: number;
+    format: string;
+    hasAlpha: boolean;
+    downloadUrl: string;
+    previewUrl: string;
+  };
+}
+
+function BackgroundRemoveCard() {
+  const [jobs, setJobs] = useState<BgJob[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const addFiles = useCallback((files: FileList | File[]) => {
+    const arr = Array.from(files).slice(0, 5);
+    const newJobs: BgJob[] = arr.map((f) => ({
+      id: shortUuid(), file: f, previewUrl: URL.createObjectURL(f), status: "queued",
+    }));
+    setJobs((prev) => [...prev, ...newJobs]);
+  }, []);
+
+  const onFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) { addFiles(e.target.files); e.target.value = ""; }
+  };
+  const onDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
+  const onDragLeave = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(false); };
+  const onDrop = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(false); if (e.dataTransfer.files?.length > 0) addFiles(e.dataTransfer.files); };
+  const removeJob = (id: string) => { setJobs((prev) => { const j = prev.find((x) => x.id === id); if (j) URL.revokeObjectURL(j.previewUrl); return prev.filter((x) => x.id !== id); }); };
+  const clearAll = () => { jobs.forEach((j) => URL.revokeObjectURL(j.previewUrl)); setJobs([]); };
+
+  const processJob = useCallback(async (jobId: string) => {
+    setJobs((prev) => prev.map((j) => j.id === jobId ? { ...j, status: "processing" } : j));
+    const job = jobs.find((j) => j.id === jobId);
+    if (!job) return;
+    const fd = new FormData();
+    fd.append("files", job.file);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3 * 60 * 1000);
+      const resp = await fetch("/api/remove-bg", { method: "POST", body: fd, signal: controller.signal });
+      clearTimeout(timeoutId);
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) {
+        setJobs((prev) => prev.map((j) => j.id === jobId ? { ...j, status: "failed", error: data.error || "Background removal failed.", errorCode: data.errorCode } : j));
+        return;
+      }
+      setJobs((prev) => prev.map((j) => j.id === jobId ? { ...j, status: "completed", result: data.output } : j));
+    } catch (err: any) {
+      let errMsg = "Background removal failed. Please try again.";
+      if (err?.name === "AbortError") errMsg = "Timed out (3 min). Try a smaller image.";
+      else if (err?.message?.includes("Failed to fetch")) errMsg = "Connection lost. Please try again.";
+      setJobs((prev) => prev.map((j) => j.id === jobId ? { ...j, status: "failed", error: errMsg } : j));
+    }
+  }, [jobs]);
+
+  const processAll = useCallback(async () => {
+    const queued = jobs.filter((j) => j.status === "queued");
+    for (const job of queued) { await processJob(job.id); }
+  }, [jobs, processJob]);
+
+  const completedCount = jobs.filter((j) => j.status === "completed").length;
+  const failedCount = jobs.filter((j) => j.status === "failed").length;
+  const processingCount = jobs.filter((j) => j.status === "processing").length;
+  const queuedCount = jobs.filter((j) => j.status === "queued").length;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+          <Scissors className="size-4 sm:size-5 text-rose-500" />
+          Background Remover
+        </CardTitle>
+        <CardDescription className="text-xs sm:text-sm">
+          Remove the background from any photo and get a transparent PNG
+          with full resolution preserved. Powered by AI (rembg + u2net model).
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div
+          onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
+          onClick={() => fileInputRef.current?.click()}
+          className={cn(
+            "relative border-2 border-dashed rounded-lg p-4 sm:p-6 text-center cursor-pointer transition-all",
+            isDragging ? "border-rose-400 bg-rose-50 dark:bg-rose-950/30" : "border-stone-300 dark:border-stone-700 hover:border-stone-400 dark:hover:border-stone-600 hover:bg-stone-50 dark:hover:bg-stone-900/50"
+          )}
+        >
+          <input ref={fileInputRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/bmp,.jpg,.jpeg,.png,.webp,.bmp" onChange={onFileInputChange} className="sr-only" />
+          <Scissors className="mx-auto size-6 sm:size-8 text-stone-400 dark:text-stone-600 mb-2" />
+          <p className="text-sm sm:text-base font-medium">Drop image here to remove background</p>
+          <p className="text-xs sm:text-sm text-stone-500 dark:text-stone-400 mt-1">JPG, PNG, WEBP, BMP · Up to 5 images · 50MB each</p>
+        </div>
+        {jobs.length > 0 && (
+          <>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={processAll} disabled={queuedCount === 0 || processingCount > 0} className="gap-2" size="sm">
+                {processingCount > 0 ? <Loader2 className="size-4 animate-spin" /> : <Scissors className="size-4" />}
+                {processingCount > 0 ? `Removing (${processingCount})...` : `Remove Background${queuedCount > 0 ? ` (${queuedCount})` : ""}`}
+              </Button>
+              <Button variant="outline" size="sm" onClick={clearAll} className="gap-2">Clear all</Button>
+              <div className="ml-auto flex items-center gap-2 text-xs text-stone-500 dark:text-stone-400">
+                <span>{jobs.length} file{jobs.length === 1 ? "" : "s"}</span>
+                {completedCount > 0 && (<><Separator orientation="vertical" className="h-4" /><span className="text-emerald-600">{completedCount} done</span></>)}
+                {failedCount > 0 && (<><Separator orientation="vertical" className="h-4" /><span className="text-rose-600">{failedCount} failed</span></>)}
+              </div>
+            </div>
+            <div className="grid gap-3">
+              {jobs.map((job) => (
+                <BgJobCard key={job.id} job={job} onRemove={() => removeJob(job.id)} onRetry={() => processJob(job.id)} />
+              ))}
+            </div>
+          </>
+        )}
+        <p className="text-[11px] sm:text-xs text-stone-500 dark:text-stone-400">
+          The AI model identifies the foreground subject (person, product, object) and removes everything else.
+          Output is a transparent PNG with the same resolution as the input — no quality loss.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function BgJobCard({ job, onRemove, onRetry }: { job: BgJob; onRemove: () => void; onRetry: () => void; }) {
+  const [showPreview, setShowPreview] = useState(false);
+  const isProcessing = job.status === "processing";
+  const isCompleted = job.status === "completed";
+  const isFailed = job.status === "failed";
+  return (
+    <div className="rounded-md border border-stone-200 dark:border-stone-800 p-3 sm:p-4 space-y-3">
+      <div className="flex items-start gap-3">
+        <div className="size-12 sm:size-14 rounded-md overflow-hidden bg-stone-100 dark:bg-stone-800 flex items-center justify-center shrink-0">
+          {job.previewUrl ? <img src={job.previewUrl} alt={job.file.name} className="w-full h-full object-cover" /> : <ImageIcon className="size-5 text-stone-400" />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm sm:text-base font-medium truncate">{job.file.name}</p>
+          <p className="text-xs text-stone-500 dark:text-stone-400">{formatBytes(job.file.size)}</p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {job.status === "queued" && <Badge variant="outline" className="text-stone-500">Queued</Badge>}
+          {isProcessing && <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800"><Loader2 className="size-3 mr-1 animate-spin" />Removing...</Badge>}
+          {isCompleted && <Badge variant="outline" className="text-emerald-600 border-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 dark:border-emerald-800"><CheckCircle2 className="size-3 mr-1" />Done</Badge>}
+          {isFailed && <Badge variant="outline" className="text-rose-600 border-rose-300 bg-rose-50 dark:bg-rose-950/40 dark:border-rose-800"><XCircle className="size-3 mr-1" />Failed</Badge>}
+          <Button variant="ghost" size="icon" className="size-8 text-stone-500 hover:text-stone-700" onClick={onRemove} aria-label="Remove"><XCircle className="size-4" /></Button>
+        </div>
+      </div>
+      {isFailed && (
+        <div className="rounded-md border border-rose-200 bg-rose-50 dark:bg-rose-950/30 dark:border-rose-900 px-3 py-2 text-xs sm:text-sm text-rose-700 dark:text-rose-300 flex items-start gap-2">
+          <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+          <div className="min-w-0"><p className="font-medium">Background removal failed</p><p className="mt-0.5 break-words">{job.error}</p><Button size="sm" variant="outline" className="mt-2 h-7 text-xs" onClick={onRetry}>Retry</Button></div>
+        </div>
+      )}
+      {isCompleted && job.result && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <figure className="space-y-1">
+              <div className="overflow-hidden rounded border border-stone-200 dark:border-stone-800 bg-[conic-gradient(at_50%_50%,_#e5e5e5_25%,_#f5f5f5_25%_50%,_#e5e5e5_50%_75%,_#f5f5f5_75%)] bg-[length:16px_16px]" style={{ aspectRatio: "1" }}>
+                <img src={job.previewUrl} alt={`Original: ${job.file.name}`} className="w-full h-full object-contain" />
+              </div>
+              <figcaption className="text-[11px] sm:text-xs text-stone-500 dark:text-stone-400 text-center">Original</figcaption>
+            </figure>
+            <figure className="space-y-1">
+              <div className="overflow-hidden rounded border border-stone-200 dark:border-stone-800 bg-[conic-gradient(at_50%_50%,_#e5e5e5_25%,_#f5f5f5_25%_50%,_#e5e5e5_50%_75%,_#f5f5f5_75%)] bg-[length:16px_16px]" style={{ aspectRatio: "1" }}>
+                <img src={job.result.previewUrl} alt="Background removed" className="w-full h-full object-contain" />
+              </div>
+              <figcaption className="text-[11px] sm:text-xs text-stone-500 dark:text-stone-400 text-center">Transparent PNG</figcaption>
+            </figure>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            <span className="text-stone-500 dark:text-stone-400">{job.result.width}×{job.result.height}px · {formatBytes(job.result.bytes)}</span>
+            <Button asChild size="sm" className="gap-2 h-7 text-xs ml-auto"><a href={job.result.downloadUrl} download><Download className="size-3.5" />Download PNG</a></Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// PDF PAGE CARD
+// ============================================================================
+function PdfPageCard({ page }: { page: PdfPageResult }) {
+  const [showPreview, setShowPreview] = useState(false);
+  return (
+    <div className="rounded-md border border-stone-200 dark:border-stone-800 p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="size-6 rounded bg-stone-100 dark:bg-stone-800 flex items-center justify-center text-[11px] font-medium shrink-0">{page.pageNumber}</span>
+          <div className="min-w-0">
+            <p className="text-xs sm:text-sm font-medium truncate">Page {page.pageNumber}</p>
+            <p className="text-[10px] text-stone-500 dark:text-stone-400">{page.width}×{page.height}px · {formatBytes(page.bytes)}</p>
+          </div>
+        </div>
+        {page.ok ? (
+          <Badge variant="outline" className="text-emerald-600 border-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 dark:border-emerald-800 shrink-0"><CheckCircle2 className="size-3 mr-1" />Done</Badge>
+        ) : (
+          <Badge variant="outline" className="text-rose-600 border-rose-300 bg-rose-50 dark:bg-rose-950/40 dark:border-rose-800 shrink-0"><XCircle className="size-3 mr-1" />Failed</Badge>
+        )}
+      </div>
+      {page.ok ? (
+        <div className="space-y-2">
+          {page.validated && (<div className="flex items-center gap-1.5 text-[10px] text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="size-3" /><span>CMYK validated · 600 DPI</span></div>)}
+          {showPreview && page.previewUrl && (
+            <div className="overflow-hidden rounded border border-stone-200 dark:border-stone-800 bg-[conic-gradient(at_50%_50%,_#e5e5e5_25%,_#f5f5f5_25%_50%,_#e5e5e5_50%_75%,_#f5f5f5_75%)] bg-[length:16px_16px]" style={{ maxHeight: "300px" }}>
+              <img src={page.previewUrl} alt={`Page ${page.pageNumber} preview`} className="w-full h-auto max-h-[300px] object-contain" />
+            </div>
+          )}
+          <div className="flex flex-wrap gap-1.5">
+            <Button asChild size="sm" className="gap-1.5 h-7 text-xs"><a href={page.downloadUrl} download><Download className="size-3.5" />Download JPG</a></Button>
+            <Button size="sm" variant="ghost" className="gap-1.5 h-7 text-xs" onClick={() => setShowPreview((v) => !v)}><Eye className="size-3.5" />{showPreview ? "Hide" : "Preview"}</Button>
+          </div>
+        </div>
+      ) : (
+        <p className="text-[11px] text-rose-600 dark:text-rose-400">{page.error || "Page processing failed."}</p>
+      )}
     </div>
   );
 }

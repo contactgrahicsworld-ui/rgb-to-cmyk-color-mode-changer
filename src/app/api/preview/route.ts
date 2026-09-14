@@ -15,36 +15,30 @@ export async function GET(req: NextRequest) {
   if (!sessionId || !fileId) {
     return NextResponse.json({ ok: false, error: "Missing sessionId or fileId." }, { status: 400 });
   }
-  if (!/^[a-f0-9-]{36}$/i.test(sessionId) || !/^[a-f0-9-]{36}$/i.test(fileId)) {
-    return NextResponse.json({ ok: false, error: "Invalid session or file ID." }, { status: 400 });
+  const uuidRe = /^[a-f0-9-]{36}$/i;
+  const pageIdRe = /^page_\d+$/;
+  if (!uuidRe.test(sessionId)) {
+    return NextResponse.json({ ok: false, error: "Invalid session ID." }, { status: 400 });
+  }
+  if (!uuidRe.test(fileId) && !pageIdRe.test(fileId)) {
+    return NextResponse.json({ ok: false, error: "Invalid file ID." }, { status: 400 });
   }
 
-  const candidatePaths = [
-    join(TMP_ROOT, sessionId, `${fileId}_preview.jpg`),
-  ];
+  const candidatePaths = [join(TMP_ROOT, sessionId, `${fileId}_preview.jpg`)];
 
   let filePath: string | null = null;
   for (const p of candidatePaths) {
     try {
       const s = await stat(p);
-      if (s.isFile() && s.size > 0) {
-        filePath = p;
-        break;
-      }
-    } catch {
-      // continue
-    }
+      if (s.isFile() && s.size > 0) { filePath = p; break; }
+    } catch {}
   }
 
   if (!filePath) {
-    return NextResponse.json(
-      { ok: false, error: "File not found or expired." },
-      { status: 404 }
-    );
+    return NextResponse.json({ ok: false, error: "File not found or expired." }, { status: 404 });
   }
 
   const buf = await readFile(filePath);
-
   return new NextResponse(buf as any, {
     status: 200,
     headers: {
