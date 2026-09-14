@@ -631,11 +631,13 @@ async function runConvertPipelineInner(
   // Step 4c: Near-white snapping — anti-aliased text edges fading into
   // white background get cleaned to pure C0 M0 Y0 K0
   report("Cleaning white background", 80);
-  const NEAR_WHITE_THRESHOLD_PCT = 92;
+  const NEAR_WHITE_THRESHOLD_PCT = 96;  // raised to 96% to not catch yellow (92.8%)
   const nearWhiteMaskPath = join(tmpDir, "mask_nearwhite2.miff");
   const nearWhiteExactPath = join(tmpDir, "exact_nearwhite2.miff");
   const nearWhiteSnappedPath = join(tmpDir, "snapped_nearwhite2.miff");
 
+  // Near-white mask: white where luma >= 96% (only very near white)
+  // This avoids catching yellow (luma ~93%) which should stay as pure yellow CMYK
   await runCmd(IM_CONVERT, [enhancedPath, "-colorspace", "Gray", "-threshold", `${NEAR_WHITE_THRESHOLD_PCT}%`, "-alpha", "off", nearWhiteMaskPath], PROCESS_TIMEOUT_MS);
   await runCmd(IM_CONVERT, ["-size", `${dims.width}x${dims.height}`, "xc:cmyk(0,0,0,0)", "-colorspace", "CMYK", "-depth", "8", nearWhiteExactPath], PROCESS_TIMEOUT_MS);
   await runCmd(IM_CONVERT, [currentCmykPath, nearWhiteExactPath, nearWhiteMaskPath, "-composite", "-set", "colorspace", "CMYK", nearWhiteSnappedPath], PROCESS_TIMEOUT_MS);
