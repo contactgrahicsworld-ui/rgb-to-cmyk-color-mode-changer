@@ -23,3 +23,8 @@ bin/
 skills/
 .zscripts/
 scripts/bg-remove.log
+examples/
+mini-services/
+tests/
+Caddyfile
+*-+*
