@@ -214,7 +214,7 @@ function runCmd(
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
       cwd: TMP_ROOT,
-      env: { ...process.env, MAGICK_CONFIGURE_PATH: "/etc/ImageMagick-7" },
+      env: { ...process.env, MAGICK_CONFIGURE_PATH: IM_BIN_DIR === _SYSTEM_IM ? "/etc/ImageMagick-7" : "/home/z/my-project/bin/imagemagick/etc/ImageMagick-7" },
       stdio: ["ignore", "pipe", "pipe"],
     });
 
