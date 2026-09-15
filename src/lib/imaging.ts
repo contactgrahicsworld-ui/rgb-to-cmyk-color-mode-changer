@@ -7,10 +7,13 @@ import { randomUUID } from "crypto";
 // CONSTANTS
 // ============================================================================
 
-const IM_BIN_DIR = process.cwd() + "/bin/imagemagick/usr/bin";
-const IM_CONVERT = `${IM_BIN_DIR}/convert-im7.q16`;
-const IM_IDENTIFY = `${IM_BIN_DIR}/identify-im7.q16`;
-const IM_MAGICK = `${IM_BIN_DIR}/magick-im7.q16`;
+// Try system ImageMagick first, fall back to bundled
+const SYSTEM_IM = "/usr/bin";
+const BUNDLED_IM = process.cwd() + "/bin/imagemagick/usr/bin";
+const IM_BIN_DIR = require("fs").existsSync(`${SYSTEM_IM}/convert`) ? SYSTEM_IM : BUNDLED_IM;
+const IM_CONVERT = IM_BIN_DIR === SYSTEM_IM ? `${IM_BIN_DIR}/convert` : `${IM_BIN_DIR}/convert-im7.q16`;
+const IM_IDENTIFY = IM_BIN_DIR === SYSTEM_IM ? `${IM_BIN_DIR}/identify` : `${IM_BIN_DIR}/identify-im7.q16`;
+const IM_MAGICK = IM_BIN_DIR === SYSTEM_IM ? `${IM_BIN_DIR}/magick` : `${IM_BIN_DIR}/magick-im7.q16`;
 
 const ICC_SRGB = join(process.cwd(), "icc", "srgb.icc");
 const ICC_CMYK = join(process.cwd(), "icc", "default_cmyk.icc");
@@ -205,7 +208,7 @@ function runCmd(
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
       cwd: TMP_ROOT,
-      env: { ...process.env, MAGICK_CONFIGURE_PATH: process.cwd() + "/bin/imagemagick/etc/ImageMagick-7" },
+      env: { ...process.env, MAGICK_CONFIGURE_PATH: "/etc/ImageMagick-7" },
       stdio: ["ignore", "pipe", "pipe"],
     });
 
