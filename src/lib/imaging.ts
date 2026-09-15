@@ -12,8 +12,8 @@ const IM_CONVERT = `${IM_BIN_DIR}/convert-im7.q16`;
 const IM_IDENTIFY = `${IM_BIN_DIR}/identify-im7.q16`;
 const IM_MAGICK = `${IM_BIN_DIR}/magick-im7.q16`;
 
-const ICC_SRGB = "/usr/share/color/icc/ghostscript/srgb.icc";
-const ICC_CMYK = "/usr/share/color/icc/ghostscript/default_cmyk.icc";
+const ICC_SRGB = join(process.cwd(), "icc", "srgb.icc");
+const ICC_CMYK = join(process.cwd(), "icc", "default_cmyk.icc");
 
 const TMP_ROOT = "/tmp/imaging-converter";
 
@@ -205,7 +205,7 @@ function runCmd(
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
       cwd: TMP_ROOT,
-      env: { ...process.env, MAGICK_CONFIGURE_PATH: "/etc/ImageMagick-7" },
+      env: { ...process.env, MAGICK_CONFIGURE_PATH: process.cwd() + "/bin/imagemagick/etc/ImageMagick-7" },
       stdio: ["ignore", "pipe", "pipe"],
     });
 
