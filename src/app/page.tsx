@@ -128,7 +128,7 @@ interface FileJob {
 // HELPERS
 // ============================================================================
 // Enhancement options capped at 4× for reliable performance
-const ENHANCEMENT_OPTIONS: EnhancementFactor[] = [1, 2, 4];
+const ENHANCEMENT_OPTIONS: EnhancementFactor[] = [1, 2];
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -562,7 +562,7 @@ export default function Home() {
               <ul className="text-xs sm:text-sm space-y-1.5 text-stone-600 dark:text-stone-400 list-disc list-inside pl-2">
                 <li>ऊपर अपलोड बॉक्स में इमेज ड्रैग-ड्रॉप करें या "Choose Files" पर क्लिक करें। JPG, PNG, TIFF, WEBP और PDF सपोर्टेड हैं।</li>
                 <li>इमेज का कलर मोड अपने आप डिटेक्ट हो जाएगा (RGB, RGBA, Grayscale या CMYK)।</li>
-                <li>Enhancement factor चुनें — <strong>1×</strong> (बिना बढ़ाए), <strong>2×</strong> (2 गुना), या <strong>4×</strong> (4 गुना रिज़ॉल्यूशन)।</li>
+                <li>Enhancement factor चुनें — <strong>1×</strong> (बिना बढ़ाए) या <strong>2×</strong> (2 गुना रिज़ॉल्यूशन)।</li>
                 <li>"Convert to CMYK" बटन दबाएँ। इमेज ICC प्रोफाइल (sRGB → CMYK) के साथ प्रोसेस होगी।</li>
                 <li>ब्लैक टेक्स्ट अपने आप <strong>C0 M0 Y0 K100</strong> हो जाएगा — ऑफ़सेट प्रिंटिंग के लिए एकदम सही।</li>
                 <li>8 प्योर कलर्स (लाल, काला, सफ़ेद, सियान, मैजेंटा, पीला, नीला, हरा) एक्ज़ैक्ट CMYK वैल्यूज़ में कन्वर्ट होंगे।</li>

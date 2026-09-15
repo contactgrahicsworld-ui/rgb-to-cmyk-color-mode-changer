@@ -354,7 +354,7 @@ export function safeEnhancementFactors(
   inputH: number
 ): EnhancementFactor[] {
   // Capped at 4× — higher factors cause memory/timeout failures
-  const all: EnhancementFactor[] = [1, 2, 4];
+  const all: EnhancementFactor[] = [1, 2];
   return all.filter((f) => canEnhance(inputW, inputH, f).ok);
 }
 

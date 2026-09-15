@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
   await rm(sessionDir, { recursive: true, force: true });
   const safeFactors = safeEnhancementFactors(info.width, info.height);
   const maxIn = Math.max(info.width, info.height);
-  const factorChecks = [1, 2, 4].map((f) => {
+  const factorChecks = [1, 2].map((f) => {
     const check = canEnhance(info.width, info.height, f as EnhancementFactor);
     return { factor: f, safe: check.ok, reason: check.reason };
   });
