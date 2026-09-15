@@ -8,13 +8,18 @@ import { randomUUID } from "crypto";
 // CONSTANTS
 // ============================================================================
 
-// Try system ImageMagick first, fall back to bundled
-const SYSTEM_IM = "/usr/bin";
-const BUNDLED_IM = process.cwd() + "/bin/imagemagick/usr/bin";
-const IM_BIN_DIR = existsSync(`${SYSTEM_IM}/convert`) ? SYSTEM_IM : BUNDLED_IM;
-const IM_CONVERT = IM_BIN_DIR === SYSTEM_IM ? `${IM_BIN_DIR}/convert` : `${IM_BIN_DIR}/convert-im7.q16`;
-const IM_IDENTIFY = IM_BIN_DIR === SYSTEM_IM ? `${IM_BIN_DIR}/identify` : `${IM_BIN_DIR}/identify-im7.q16`;
-const IM_MAGICK = IM_BIN_DIR === SYSTEM_IM ? `${IM_BIN_DIR}/magick` : `${IM_BIN_DIR}/magick-im7.q16`;
+// ImageMagick binary detection — wrapped in try-catch to prevent crashes
+const _SYSTEM_IM = "/usr/bin";
+const _BUNDLED_IM = process.cwd() + "/bin/imagemagick/usr/bin";
+let _imDir: string;
+try {
+  _imDir = existsSync(`${_SYSTEM_IM}/convert`) ? _SYSTEM_IM : _BUNDLED_IM;
+} catch {
+  _imDir = _SYSTEM_IM;
+}
+const IM_BIN_DIR = _imDir;
+const IM_CONVERT = IM_BIN_DIR === _SYSTEM_IM ? `${IM_BIN_DIR}/convert` : `${IM_BIN_DIR}/convert-im7.q16`;
+const IM_IDENTIFY = IM_BIN_DIR === _SYSTEM_IM ? `${IM_BIN_DIR}/identify` : `${IM_BIN_DIR}/identify-im7.q16`;
 
 const ICC_SRGB = join(process.cwd(), "icc", "srgb.icc");
 const ICC_CMYK = join(process.cwd(), "icc", "default_cmyk.icc");
