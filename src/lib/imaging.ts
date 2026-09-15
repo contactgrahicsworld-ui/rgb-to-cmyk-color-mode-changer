@@ -1,5 +1,6 @@
 import { spawn } from "child_process";
-import { mkdir, readdir, rm, stat } from "fs/promises";
+import { existsSync } from "fs";
+import { mkdir, readdir, rm, stat, writeFile, readFile } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
 
@@ -10,7 +11,7 @@ import { randomUUID } from "crypto";
 // Try system ImageMagick first, fall back to bundled
 const SYSTEM_IM = "/usr/bin";
 const BUNDLED_IM = process.cwd() + "/bin/imagemagick/usr/bin";
-const IM_BIN_DIR = require("fs").existsSync(`${SYSTEM_IM}/convert`) ? SYSTEM_IM : BUNDLED_IM;
+const IM_BIN_DIR = existsSync(`${SYSTEM_IM}/convert`) ? SYSTEM_IM : BUNDLED_IM;
 const IM_CONVERT = IM_BIN_DIR === SYSTEM_IM ? `${IM_BIN_DIR}/convert` : `${IM_BIN_DIR}/convert-im7.q16`;
 const IM_IDENTIFY = IM_BIN_DIR === SYSTEM_IM ? `${IM_BIN_DIR}/identify` : `${IM_BIN_DIR}/identify-im7.q16`;
 const IM_MAGICK = IM_BIN_DIR === SYSTEM_IM ? `${IM_BIN_DIR}/magick` : `${IM_BIN_DIR}/magick-im7.q16`;
