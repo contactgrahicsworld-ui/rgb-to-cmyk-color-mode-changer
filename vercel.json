@@ -1,7 +1,7 @@
 {
   "version": 2,
-  "buildCommand": "bun run build",
-  "installCommand": "bun install",
+  "buildCommand": "yum install -y ImageMagick ghostscript liblcms2 2>/dev/null; npm install && npx next build",
+  "outputDirectory": ".next",
   "framework": "nextjs",
   "regions": ["bom1"],
   "functions": {
@@ -14,10 +14,6 @@
       "memory": 1024
     },
     "src/app/api/check-limits/route.ts": {
-      "maxDuration": 10,
-      "memory": 512
-    },
-    "src/app/api/inspect/route.ts": {
       "maxDuration": 10,
       "memory": 512
     }
