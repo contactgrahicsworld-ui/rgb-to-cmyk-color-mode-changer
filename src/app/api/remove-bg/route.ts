@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
     await rm(sessionDir, { recursive: true, force: true });
     return NextResponse.json({ ok: false, errorCode: "INTERNAL" as ErrorCode, error: "Failed to store file." }, { status: 500 });
   }
-  const scriptPath = join(process.cwd(), "scripts", "bg_remove_one.py");
+  const scriptPath = "/home/z/my-project/scripts/bg_remove_one.py";
   const outPath = join(sessionDir, `${fileId}_transparent.png`);
   try {
     const result = await spawnAsync("python3", [scriptPath, uploadPath, outPath], 4 * 60 * 1000);
@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
 
 function spawnAsync(cmd: string, args: string[], timeoutMs: number): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(cmd, args, { cwd: "/home/z/my-project/scripts", stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", timedOut = false;
     const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, timeoutMs);
     child.stdout?.on("data", (d: Buffer) => (stdout += d.toString()));

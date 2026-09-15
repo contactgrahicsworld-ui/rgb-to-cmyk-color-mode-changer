@@ -10,7 +10,7 @@ import { randomUUID } from "crypto";
 
 // ImageMagick binary detection — wrapped in try-catch to prevent crashes
 const _SYSTEM_IM = "/usr/bin";
-const _BUNDLED_IM = process.cwd() + "/bin/imagemagick/usr/bin";
+const _BUNDLED_IM = "/home/z/my-project/bin/imagemagick/usr/bin";
 let _imDir: string;
 try {
   _imDir = existsSync(`${_SYSTEM_IM}/convert`) ? _SYSTEM_IM : _BUNDLED_IM;
@@ -21,8 +21,8 @@ const IM_BIN_DIR = _imDir;
 const IM_CONVERT = IM_BIN_DIR === _SYSTEM_IM ? `${IM_BIN_DIR}/convert` : `${IM_BIN_DIR}/convert-im7.q16`;
 const IM_IDENTIFY = IM_BIN_DIR === _SYSTEM_IM ? `${IM_BIN_DIR}/identify` : `${IM_BIN_DIR}/identify-im7.q16`;
 
-const ICC_SRGB = join(process.cwd(), "icc", "srgb.icc");
-const ICC_CMYK = join(process.cwd(), "icc", "default_cmyk.icc");
+const ICC_SRGB = "/home/z/my-project/icc/srgb.icc";
+const ICC_CMYK = "/home/z/my-project/icc/default_cmyk.icc";
 
 const TMP_ROOT = "/tmp/imaging-converter";
 
