@@ -7,7 +7,7 @@ import { randomUUID } from "crypto";
 // CONSTANTS
 // ============================================================================
 
-const IM_BIN_DIR = "/home/z/my-project/bin/imagemagick/usr/bin";
+const IM_BIN_DIR = process.cwd() + "/bin/imagemagick/usr/bin";
 const IM_CONVERT = `${IM_BIN_DIR}/convert-im7.q16`;
 const IM_IDENTIFY = `${IM_BIN_DIR}/identify-im7.q16`;
 const IM_MAGICK = `${IM_BIN_DIR}/magick-im7.q16`;

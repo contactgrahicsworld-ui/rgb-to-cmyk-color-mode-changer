@@ -15,7 +15,6 @@ dev.log
 server.log
 db/
 download/
-bin/
 .venv/
 .turbopack/
 .cache/
