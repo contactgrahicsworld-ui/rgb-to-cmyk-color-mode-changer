@@ -27,3 +27,4 @@ mini-services/
 tests/
 Caddyfile
 *-+*
+!.next/standalone/
